@@ -561,17 +561,23 @@ function PanelView({ students, weeklyMinutes, pendingTasks, lastExamAvgNet, exam
               const lastNet = studentExams[0] ? studentExams[0].subjects.reduce((a, x) => a + netOf(x.correct, x.wrong), 0).toFixed(1) : null;
               const openTasks = tasks.filter((t) => t.studentId === s.id && !t.done).length;
               return (
-                <Card key={s.id} className="p-4 flex items-center gap-3 cursor-pointer hover:shadow-md transition" onClick={() => onSelectStudent(s.id)}>
-                  <Avatar name={s.name} />
-                  <div className="flex-1 min-w-0">
-                    <div className="font-semibold text-sm truncate" style={{ color: ACCENT.ink }}>{s.name}</div>
-                    <div className="text-xs" style={{ color: ACCENT.inkSoft }}>
-                      {s.grade ? `${s.grade} · ` : ""}{studentSessions.length} etüt kaydı
-                      {lastNet && ` · son net ${lastNet}`}
-                      {openTasks > 0 && ` · ${openTasks} ödev`}
+                <Card key={s.id} className="p-0 overflow-hidden">
+                  <button
+                    type="button"
+                    onClick={() => onSelectStudent(s.id)}
+                    className="w-full text-left p-4 flex items-center gap-3 active:bg-black/5 transition"
+                  >
+                    <Avatar name={s.name} />
+                    <div className="flex-1 min-w-0">
+                      <div className="font-semibold text-sm truncate" style={{ color: ACCENT.ink }}>{s.name}</div>
+                      <div className="text-xs" style={{ color: ACCENT.inkSoft }}>
+                        {s.grade ? `${s.grade} · ` : ""}{studentSessions.length} etüt kaydı
+                        {lastNet && ` · son net ${lastNet}`}
+                        {openTasks > 0 && ` · ${openTasks} ödev`}
+                      </div>
                     </div>
-                  </div>
-                  <ChevronRight size={16} style={{ color: ACCENT.inkSoft }} />
+                    <ChevronRight size={16} style={{ color: ACCENT.inkSoft }} />
+                  </button>
                 </Card>
               );
             })}
@@ -669,13 +675,19 @@ function StudentsView({
       ) : (
         <div className="space-y-2">
           {students.map((s) => (
-            <Card key={s.id} className="p-3.5 flex items-center gap-3 cursor-pointer hover:shadow-md transition" onClick={() => setSelectedStudentId(s.id)}>
-              <Avatar name={s.name} />
-              <div className="flex-1 min-w-0">
-                <div className="font-semibold text-sm truncate" style={{ color: ACCENT.ink }}>{s.name}</div>
-                <div className="text-xs" style={{ color: ACCENT.inkSoft }}>{s.grade || "Sınıf belirtilmedi"}</div>
-              </div>
-              <ChevronRight size={16} style={{ color: ACCENT.inkSoft }} />
+            <Card key={s.id} className="p-0 overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setSelectedStudentId(s.id)}
+                className="w-full text-left p-3.5 flex items-center gap-3 active:bg-black/5 transition"
+              >
+                <Avatar name={s.name} />
+                <div className="flex-1 min-w-0">
+                  <div className="font-semibold text-sm truncate" style={{ color: ACCENT.ink }}>{s.name}</div>
+                  <div className="text-xs" style={{ color: ACCENT.inkSoft }}>{s.grade || "Sınıf belirtilmedi"}</div>
+                </div>
+                <ChevronRight size={16} style={{ color: ACCENT.inkSoft }} />
+              </button>
             </Card>
           ))}
         </div>
