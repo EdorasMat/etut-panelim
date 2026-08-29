@@ -1,0 +1,9 @@
+{
+  "name": "Etüt Panelim",
+  "short_name": "Etüt Panelim",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#FAF7F1",
+  "theme_color": "#FAF7F1",
+  "icons": []
+}
