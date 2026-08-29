@@ -4,9 +4,129 @@ import {
 } from "recharts";
 import {
   Users, BookOpen, ClipboardList, LayoutGrid, Plus, X, Trash2, Check,
-  Clock, TrendingUp, ChevronRight, Pencil,
+  Clock, TrendingUp, ChevronRight, Pencil, Lock,
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
+
+// ---------- Desen Kilidi ----------
+// Doğru desenin SHA-256 özeti (düz metin olarak tutulmuyor)
+const PATTERN_HASH = "eec8d53877f6a527a2c227272cc42ae50ea691c2f5a53c37e121af04c12b7fff";
+const PATTERN_MIN_DOTS = 4;
+const PATTERN_UNLOCK_KEY = "etut-panelim-kilit-acik";
+
+async function sha256Hex(text) {
+  const enc = new TextEncoder().encode(text);
+  const buf = await crypto.subtle.digest("SHA-256", enc);
+  return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+function PatternLockScreen({ onUnlock }) {
+  const [path, setPath] = useState([]);
+  const [drawing, setDrawing] = useState(false);
+  const [error, setError] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const svgRef = React.useRef(null);
+
+  const dotPositions = [
+    [50, 50], [150, 50], [250, 50],
+    [50, 150], [150, 150], [250, 150],
+    [50, 250], [150, 250], [250, 250],
+  ];
+
+  const getRelativePoint = (clientX, clientY) => {
+    const rect = svgRef.current.getBoundingClientRect();
+    const scaleX = 300 / rect.width;
+    const scaleY = 300 / rect.height;
+    return { x: (clientX - rect.left) * scaleX, y: (clientY - rect.top) * scaleY };
+  };
+
+  const hitDot = (x, y) => {
+    for (let i = 0; i < dotPositions.length; i++) {
+      const [dx, dy] = dotPositions[i];
+      if (Math.hypot(dx - x, dy - y) < 26) return i;
+    }
+    return -1;
+  };
+
+  const startDraw = (clientX, clientY) => {
+    if (checking) return;
+    const { x, y } = getRelativePoint(clientX, clientY);
+    const idx = hitDot(x, y);
+    setError(false);
+    if (idx !== -1) {
+      setPath([idx]);
+      setDrawing(true);
+    }
+  };
+  const moveDraw = (clientX, clientY) => {
+    if (!drawing || checking) return;
+    const { x, y } = getRelativePoint(clientX, clientY);
+    const idx = hitDot(x, y);
+    if (idx !== -1 && !path.includes(idx)) setPath((p) => [...p, idx]);
+  };
+  const endDraw = async () => {
+    if (!drawing) return;
+    setDrawing(false);
+    if (path.length < PATTERN_MIN_DOTS) {
+      setError(true);
+      setTimeout(() => { setPath([]); setError(false); }, 500);
+      return;
+    }
+    setChecking(true);
+    const candidate = path.map((i) => i + 1).join("");
+    const hash = await sha256Hex(candidate);
+    if (hash === PATTERN_HASH) {
+      try { localStorage.setItem(PATTERN_UNLOCK_KEY, "1"); } catch (e) {}
+      onUnlock();
+    } else {
+      setError(true);
+      setTimeout(() => { setPath([]); setError(false); setChecking(false); }, 500);
+    }
+  };
+
+  const lineColor = error ? "#E68B7F" : "#7B84EC";
+
+  return (
+    <div className="min-h-screen flex flex-col items-center justify-center gap-6 px-6" style={{ background: "#FAF7F1" }}>
+      <div className="text-center">
+        <div className="mx-auto mb-3 w-11 h-11 rounded-2xl flex items-center justify-center" style={{ background: "#7B84EC22" }}>
+          <Lock size={20} style={{ color: "#5D63C9" }} />
+        </div>
+        <div className="font-semibold" style={{ color: "#2B2822" }}>Etüt Panelim</div>
+        <div className="text-xs mt-1" style={{ color: error ? "#E68B7F" : "#8A8377" }}>
+          {error ? "Desen yanlış, tekrar dene" : "Devam etmek için deseni çiz"}
+        </div>
+      </div>
+      <svg
+        ref={svgRef}
+        viewBox="0 0 300 300"
+        width="260"
+        height="260"
+        style={{ touchAction: "none", userSelect: "none" }}
+        onMouseDown={(e) => startDraw(e.clientX, e.clientY)}
+        onMouseMove={(e) => e.buttons === 1 && moveDraw(e.clientX, e.clientY)}
+        onMouseUp={endDraw}
+        onMouseLeave={() => drawing && endDraw()}
+        onTouchStart={(e) => startDraw(e.touches[0].clientX, e.touches[0].clientY)}
+        onTouchMove={(e) => { e.preventDefault(); moveDraw(e.touches[0].clientX, e.touches[0].clientY); }}
+        onTouchEnd={endDraw}
+      >
+        {path.slice(1).map((idx, i) => {
+          const [x1, y1] = dotPositions[path[i]];
+          const [x2, y2] = dotPositions[idx];
+          return <line key={i} x1={x1} y1={y1} x2={x2} y2={y2} stroke={lineColor} strokeWidth={5} strokeLinecap="round" />;
+        })}
+        {dotPositions.map(([x, y], i) => (
+          <g key={i}>
+            <circle cx={x} cy={y} r={24} fill={path.includes(i) ? lineColor + "22" : "white"} stroke={path.includes(i) ? lineColor : "#00000018"} strokeWidth={2} />
+            <circle cx={x} cy={y} r={path.includes(i) ? 8 : 6} fill={path.includes(i) ? lineColor : "#00000030"} />
+          </g>
+        ))}
+      </svg>
+      <div className="text-xs" style={{ color: "#8A8377" }}>En az {PATTERN_MIN_DOTS} nokta birleştir</div>
+    </div>
+  );
+}
 
 // ---------- Sabitler ----------
 const SUBJECTS = ["Matematik", "Geometri", "Türkçe", "Fizik", "Kimya", "Biyoloji", "Tarih", "Coğrafya"];
@@ -127,6 +247,18 @@ function PrimaryButton({ children, onClick, disabled, className = "" }) {
 
 // ---------- Ana Uygulama ----------
 export default function App() {
+  const [unlocked, setUnlocked] = useState(() => {
+    try { return localStorage.getItem(PATTERN_UNLOCK_KEY) === "1"; } catch (e) { return false; }
+  });
+
+  if (!unlocked) {
+    return <PatternLockScreen onUnlock={() => setUnlocked(true)} />;
+  }
+
+  return <UnlockedApp />;
+}
+
+function UnlockedApp() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
