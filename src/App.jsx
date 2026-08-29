@@ -512,8 +512,21 @@ function UnlockedApp() {
 
 // ---------- Panel (Dashboard) ----------
 function PanelView({ students, weeklyMinutes, pendingTasks, lastExamAvgNet, exams, sessions, tasks, onSelectStudent }) {
-  const hours = Math.floor(weeklyMinutes / 60);
-  const mins = weeklyMinutes % 60;
+  const weekAgo = useMemo(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 7);
+    return d.toISOString().slice(0, 10);
+  }, []);
+
+  const weeklyStudentCounts = useMemo(() => {
+    const counts = {};
+    sessions.filter((s) => s.date >= weekAgo).forEach((s) => {
+      counts[s.studentId] = (counts[s.studentId] || 0) + 1;
+    });
+    return Object.entries(counts)
+      .map(([studentId, count]) => ({ studentId, count, name: students.find((st) => st.id === studentId)?.name || "Bilinmeyen" }))
+      .sort((a, b) => b.count - a.count);
+  }, [sessions, students, weekAgo]);
 
   const trendData = useMemo(() => {
     const sorted = [...exams].sort((a, b) => a.date.localeCompare(b.date));
@@ -527,10 +540,30 @@ function PanelView({ students, weeklyMinutes, pendingTasks, lastExamAvgNet, exam
     <div className="space-y-6">
       <div className="flex flex-wrap gap-3">
         <StatPill icon={Users} label="Öğrenci" value={students.length} color={ACCENT.primary} />
-        <StatPill icon={Clock} label="Bu hafta etüt" value={`${hours}s ${mins}dk`} color={ACCENT.sage} />
         <StatPill icon={TrendingUp} label="Ort. net (son sınavlar)" value={lastExamAvgNet ?? "—"} color={ACCENT.peach} />
         <StatPill icon={ClipboardList} label="Bekleyen ödev" value={pendingTasks.length} color={ACCENT.coral} />
       </div>
+
+      <Card className="p-5">
+        <div className="flex items-center gap-2 mb-3">
+          <Clock size={16} style={{ color: ACCENT.sage }} />
+          <div className="font-display font-semibold" style={{ color: ACCENT.ink }}>Bu hafta etüt</div>
+        </div>
+        {weeklyStudentCounts.length === 0 ? (
+          <div className="text-sm" style={{ color: ACCENT.inkSoft }}>Bu hafta henüz etüt kaydı yok.</div>
+        ) : (
+          <div className="space-y-2.5">
+            {weeklyStudentCounts.map((item) => (
+              <div key={item.studentId} className="flex items-center justify-between">
+                <span className="text-sm font-medium truncate" style={{ color: ACCENT.ink }}>{item.name}</span>
+                <span className="text-sm font-mono font-semibold shrink-0 ml-3" style={{ color: ACCENT.sage }}>
+                  {item.count} etüt
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
 
       {exams.length > 0 && (
         <Card className="p-5">
