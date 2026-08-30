@@ -4,7 +4,7 @@ import {
 } from "recharts";
 import {
   Users, BookOpen, ClipboardList, LayoutGrid, Plus, X, Trash2, Check,
-  Clock, TrendingUp, ChevronRight, Pencil, Lock,
+  Clock, TrendingUp, ChevronRight, Pencil, Lock, Wallet,
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 
@@ -164,6 +164,9 @@ const mapExamToDb = (e) => ({ student_id: e.studentId, date: e.date, exam_name: 
 const mapTaskFromDb = (r) => ({ id: r.id, studentId: r.student_id, title: r.title, dueDate: r.due_date, done: r.done });
 const mapTaskToDb = (t) => ({ student_id: t.studentId, title: t.title, due_date: t.dueDate, done: !!t.done });
 
+const mapLessonFromDb = (r) => ({ id: r.id, studentId: r.student_id, date: r.date, topic: r.topic, fee: r.fee, notes: r.notes });
+const mapLessonToDb = (l) => ({ student_id: l.studentId, date: l.date, topic: l.topic || null, fee: Number(l.fee) || 0, notes: l.notes || null });
+
 // ---------- Küçük UI parçaları ----------
 function Avatar({ name, size = 40 }) {
   const initials = (name || "?").trim().split(/\s+/).map((p) => p[0]).slice(0, 2).join("").toUpperCase();
@@ -266,6 +269,7 @@ function UnlockedApp() {
   const [sessions, setSessions] = useState([]);
   const [exams, setExams] = useState([]);
   const [tasks, setTasks] = useState([]);
+  const [lessons, setLessons] = useState([]);
   const [tab, setTab] = useState("panel");
   const [selectedStudentId, setSelectedStudentId] = useState(null);
 
@@ -273,15 +277,17 @@ function UnlockedApp() {
   const [sessionModal, setSessionModal] = useState(null);
   const [examModal, setExamModal] = useState(null);
   const [taskModal, setTaskModal] = useState(null);
+  const [lessonModal, setLessonModal] = useState(null);
 
   const fetchAll = async () => {
-    const [s, se, ex, t] = await Promise.all([
+    const [s, se, ex, t, le] = await Promise.all([
       supabase.from("students").select("*").order("created_at", { ascending: true }),
       supabase.from("study_sessions").select("*").order("date", { ascending: false }),
       supabase.from("exam_results").select("*").order("date", { ascending: false }),
       supabase.from("tasks").select("*").order("due_date", { ascending: true }),
+      supabase.from("private_lessons").select("*").order("date", { ascending: false }),
     ]);
-    if (s.error || se.error || ex.error || t.error) {
+    if (s.error || se.error || ex.error || t.error || le.error) {
       setErrorMsg("Veritabanına bağlanırken bir sorun oluştu. Supabase bağlantı bilgilerini kontrol et.");
       return;
     }
@@ -289,6 +295,7 @@ function UnlockedApp() {
     setSessions(se.data.map(mapSessionFromDb));
     setExams(ex.data.map(mapExamFromDb));
     setTasks(t.data.map(mapTaskFromDb));
+    setLessons(le.data.map(mapLessonFromDb));
     setErrorMsg("");
   };
 
@@ -302,6 +309,7 @@ function UnlockedApp() {
       .on("postgres_changes", { event: "*", schema: "public", table: "study_sessions" }, fetchAll)
       .on("postgres_changes", { event: "*", schema: "public", table: "exam_results" }, fetchAll)
       .on("postgres_changes", { event: "*", schema: "public", table: "tasks" }, fetchAll)
+      .on("postgres_changes", { event: "*", schema: "public", table: "private_lessons" }, fetchAll)
       .subscribe();
 
     return () => {
@@ -367,15 +375,38 @@ function UnlockedApp() {
   };
   const deleteTask = async (id) => { await supabase.from("tasks").delete().eq("id", id); await fetchAll(); };
 
+  const upsertLesson = async (data) => {
+    setSaving(true);
+    if (data.id) await supabase.from("private_lessons").update(mapLessonToDb(data)).eq("id", data.id);
+    else await supabase.from("private_lessons").insert(mapLessonToDb(data));
+    await fetchAll();
+    setSaving(false);
+    setLessonModal(null);
+  };
+  const deleteLesson = async (id) => { await supabase.from("private_lessons").delete().eq("id", id); await fetchAll(); };
+
   // ---- Türetilmiş veriler ----
   const weekAgo = useMemo(() => {
     const d = new Date();
     d.setDate(d.getDate() - 7);
     return d.toISOString().slice(0, 10);
   }, []);
+  const monthAgo = useMemo(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 30);
+    return d.toISOString().slice(0, 10);
+  }, []);
   const weeklyMinutes = useMemo(
     () => sessions.filter((s) => s.date >= weekAgo).reduce((a, s) => a + Number(s.duration || 0), 0),
     [sessions, weekAgo]
+  );
+  const weeklyLessonEarnings = useMemo(
+    () => lessons.filter((l) => l.date >= weekAgo).reduce((a, l) => a + Number(l.fee || 0), 0),
+    [lessons, weekAgo]
+  );
+  const monthlyLessonEarnings = useMemo(
+    () => lessons.filter((l) => l.date >= monthAgo).reduce((a, l) => a + Number(l.fee || 0), 0),
+    [lessons, monthAgo]
   );
   const pendingTasks = tasks.filter((t) => !t.done);
   const lastExamAvgNet = useMemo(() => {
@@ -397,6 +428,7 @@ function UnlockedApp() {
     { id: "students", label: "Öğrenciler", icon: Users },
     { id: "sessions", label: "Etüt", icon: BookOpen },
     { id: "exams", label: "Sınavlar", icon: TrendingUp },
+    { id: "lessons", label: "Özel Ders", icon: Wallet },
     { id: "tasks", label: "Ödevler", icon: ClipboardList },
   ];
 
@@ -445,6 +477,9 @@ function UnlockedApp() {
             exams={exams}
             sessions={sessions}
             tasks={tasks}
+            lessons={lessons}
+            weeklyLessonEarnings={weeklyLessonEarnings}
+            monthlyLessonEarnings={monthlyLessonEarnings}
             onSelectStudent={(id) => { setSelectedStudentId(id); setTab("students"); }}
           />
         )}
@@ -467,6 +502,9 @@ function UnlockedApp() {
             onDeleteExam={deleteExam}
             onToggleTask={toggleTask}
             onDeleteTask={deleteTask}
+            lessons={lessons}
+            onAddLesson={(studentId) => setLessonModal({ studentId, date: todayISO(), fee: "", topic: "" })}
+            onDeleteLesson={deleteLesson}
           />
         )}
 
@@ -481,6 +519,11 @@ function UnlockedApp() {
             onDelete={deleteExam} />
         )}
 
+        {tab === "lessons" && (
+          <LessonsView lessons={lessons} students={students} studentName={studentName}
+            onAdd={() => setLessonModal({ date: todayISO(), fee: "", topic: "" })} onDelete={deleteLesson} onEdit={(l) => setLessonModal(l)} />
+        )}
+
         {tab === "tasks" && (
           <TasksView tasks={tasks} students={students} studentName={studentName}
             onAdd={() => setTaskModal({ dueDate: todayISO(), title: "" })} onToggle={toggleTask} onDelete={deleteTask} />
@@ -488,15 +531,15 @@ function UnlockedApp() {
       </main>
 
       {/* Mobil alt gezinme */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-black/5 flex justify-around py-2 z-40">
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-black/5 flex justify-around py-2 z-40 overflow-x-auto">
         {navItems.map((n) => (
           <button
             key={n.id}
             onClick={() => setTab(n.id)}
-            className="flex flex-col items-center gap-1 px-3 py-1 rounded-xl text-[11px] font-medium"
+            className="flex flex-col items-center gap-1 px-2.5 py-1 rounded-xl text-[10px] font-medium shrink-0"
             style={{ color: tab === n.id ? ACCENT.primary : ACCENT.inkSoft }}
           >
-            <n.icon size={20} />
+            <n.icon size={19} />
             {n.label}
           </button>
         ))}
@@ -506,12 +549,13 @@ function UnlockedApp() {
       {sessionModal && <SessionModal data={sessionModal} students={students} onClose={() => setSessionModal(null)} onSave={upsertSession} saving={saving} />}
       {examModal && <ExamModal data={examModal} students={students} onClose={() => setExamModal(null)} onSave={upsertExam} saving={saving} />}
       {taskModal && <TaskModal data={taskModal} students={students} onClose={() => setTaskModal(null)} onSave={upsertTask} saving={saving} />}
+      {lessonModal && <LessonModal data={lessonModal} students={students} onClose={() => setLessonModal(null)} onSave={upsertLesson} saving={saving} />}
     </div>
   );
 }
 
 // ---------- Panel (Dashboard) ----------
-function PanelView({ students, weeklyMinutes, pendingTasks, lastExamAvgNet, exams, sessions, tasks, onSelectStudent }) {
+function PanelView({ students, weeklyMinutes, pendingTasks, lastExamAvgNet, exams, sessions, tasks, lessons, weeklyLessonEarnings, monthlyLessonEarnings, onSelectStudent }) {
   const weekAgo = useMemo(() => {
     const d = new Date();
     d.setDate(d.getDate() - 7);
@@ -542,6 +586,7 @@ function PanelView({ students, weeklyMinutes, pendingTasks, lastExamAvgNet, exam
         <StatPill icon={Users} label="Öğrenci" value={students.length} color={ACCENT.primary} />
         <StatPill icon={TrendingUp} label="Ort. net (son sınavlar)" value={lastExamAvgNet ?? "—"} color={ACCENT.peach} />
         <StatPill icon={ClipboardList} label="Bekleyen ödev" value={pendingTasks.length} color={ACCENT.coral} />
+        <StatPill icon={Wallet} label="Bu hafta kazanç" value={`₺${weeklyLessonEarnings.toLocaleString("tr-TR")}`} color={ACCENT.sage} />
       </div>
 
       <Card className="p-5">
@@ -625,6 +670,7 @@ function PanelView({ students, weeklyMinutes, pendingTasks, lastExamAvgNet, exam
 function StudentsView({
   students, sessions, exams, tasks, selectedStudentId, setSelectedStudentId,
   onAdd, onEdit, onDelete, onAddSession, onAddExam, onAddTask, onDeleteSession, onDeleteExam, onToggleTask, onDeleteTask,
+  lessons, onAddLesson, onDeleteLesson,
 }) {
   const selected = students.find((s) => s.id === selectedStudentId);
 
@@ -632,6 +678,7 @@ function StudentsView({
     const studentSessions = sessions.filter((s) => s.studentId === selected.id).sort((a, b) => b.date.localeCompare(a.date));
     const studentExams = exams.filter((e) => e.studentId === selected.id).sort((a, b) => b.date.localeCompare(a.date));
     const studentTasks = tasks.filter((t) => t.studentId === selected.id).sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+    const studentLessons = lessons.filter((l) => l.studentId === selected.id).sort((a, b) => b.date.localeCompare(a.date));
 
     return (
       <div className="space-y-5">
@@ -690,6 +737,19 @@ function StudentsView({
                   <div className={`text-sm font-medium truncate ${t.done ? "line-through" : ""}`} style={{ color: t.done ? ACCENT.inkSoft : ACCENT.ink }}>{t.title}</div>
                   <div className="text-xs" style={{ color: ACCENT.inkSoft }}>Son tarih: {fmtDate(t.dueDate)}</div>
                 </div>
+              </RowItem>
+            ))}
+        </SectionBlock>
+
+        <SectionBlock title="Özel Ders" onAdd={() => onAddLesson(selected.id)}>
+          {studentLessons.length === 0 ? <EmptyRow text="Henüz özel ders kaydı yok." /> :
+            studentLessons.map((l) => (
+              <RowItem key={l.id} onDelete={() => onDeleteLesson(l.id)}>
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium truncate" style={{ color: ACCENT.ink }}>{l.topic || "Özel ders"}</div>
+                  <div className="text-xs" style={{ color: ACCENT.inkSoft }}>{fmtDate(l.date)}</div>
+                </div>
+                <div className="font-mono text-sm font-bold shrink-0" style={{ color: ACCENT.sage }}>₺{Number(l.fee).toLocaleString("tr-TR")}</div>
               </RowItem>
             ))}
         </SectionBlock>
@@ -848,6 +908,74 @@ function TasksView({ tasks, students, studentName, onAdd, onToggle, onDelete }) 
   );
 }
 
+function LessonsView({ lessons, students, studentName, onAdd, onEdit, onDelete }) {
+  const sorted = [...lessons].sort((a, b) => b.date.localeCompare(a.date));
+  const grouped = useMemo(() => {
+    const map = {};
+    sorted.forEach((l) => {
+      if (!map[l.date]) map[l.date] = [];
+      map[l.date].push(l);
+    });
+    return Object.entries(map);
+  }, [sorted]);
+
+  const weekAgo = useMemo(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 7);
+    return d.toISOString().slice(0, 10);
+  }, []);
+  const monthAgo = useMemo(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 30);
+    return d.toISOString().slice(0, 10);
+  }, []);
+  const weeklyTotal = lessons.filter((l) => l.date >= weekAgo).reduce((a, l) => a + Number(l.fee || 0), 0);
+  const monthlyTotal = lessons.filter((l) => l.date >= monthAgo).reduce((a, l) => a + Number(l.fee || 0), 0);
+  const allTimeTotal = lessons.reduce((a, l) => a + Number(l.fee || 0), 0);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div className="font-display text-lg font-semibold" style={{ color: ACCENT.ink }}>Özel Ders</div>
+        <button onClick={onAdd} disabled={students.length === 0} className="rounded-full p-2.5 text-white disabled:opacity-40" style={{ background: ACCENT.primary }}><Plus size={18} /></button>
+      </div>
+
+      <div className="flex flex-wrap gap-3">
+        <StatPill icon={Wallet} label="Bu hafta" value={`₺${weeklyTotal.toLocaleString("tr-TR")}`} color={ACCENT.sage} />
+        <StatPill icon={Wallet} label="Bu ay" value={`₺${monthlyTotal.toLocaleString("tr-TR")}`} color={ACCENT.peach} />
+        <StatPill icon={Wallet} label="Toplam" value={`₺${allTimeTotal.toLocaleString("tr-TR")}`} color={ACCENT.primary} />
+      </div>
+
+      {students.length === 0 ? <EmptyState text="Önce Öğrenciler sekmesinden bir öğrenci ekle." /> :
+        grouped.length === 0 ? <EmptyState text="Henüz özel ders kaydı yok." /> : (
+          <div className="space-y-4">
+            {grouped.map(([date, items]) => {
+              const dayTotal = items.reduce((a, l) => a + Number(l.fee || 0), 0);
+              return (
+                <div key={date}>
+                  <div className="flex items-center justify-between px-1 mb-2">
+                    <div className="text-xs font-semibold" style={{ color: ACCENT.inkSoft }}>{fmtDate(date)}</div>
+                    <div className="text-xs font-mono font-semibold" style={{ color: ACCENT.sage }}>₺{dayTotal.toLocaleString("tr-TR")}</div>
+                  </div>
+                  <div className="space-y-2">
+                    {items.map((l) => (
+                      <RowItem key={l.id} onDelete={() => onDelete(l.id)}>
+                        <div className="flex-1 min-w-0 cursor-pointer" onClick={() => onEdit(l)}>
+                          <div className="text-sm font-medium truncate" style={{ color: ACCENT.ink }}>{studentName(l.studentId)}{l.topic ? ` · ${l.topic}` : ""}</div>
+                        </div>
+                        <div className="font-mono text-sm font-bold shrink-0" style={{ color: ACCENT.sage }}>₺{Number(l.fee).toLocaleString("tr-TR")}</div>
+                      </RowItem>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+    </div>
+  );
+}
+
 function EmptyState({ text }) {
   return <Card className="p-8 text-center"><div className="text-sm" style={{ color: ACCENT.inkSoft }}>{text}</div></Card>;
 }
@@ -979,6 +1107,30 @@ function TaskModal({ data, students, onClose, onSave, saving }) {
         <input type="date" className={inputCls} value={form.dueDate} onChange={(e) => setForm({ ...form, dueDate: e.target.value })} />
       </Field>
       <PrimaryButton disabled={saving} onClick={() => form.studentId && form.title.trim() && onSave(form)} className="mt-2">{saving ? "Kaydediliyor…" : "Kaydet"}</PrimaryButton>
+    </Modal>
+  );
+}
+
+function LessonModal({ data, students, onClose, onSave, saving }) {
+  const [form, setForm] = useState({
+    id: data.id, studentId: data.studentId || students[0]?.id || "",
+    date: data.date || todayISO(), topic: data.topic || "", fee: data.fee ?? "",
+  });
+  return (
+    <Modal title={data.id ? "Özel Dersi Düzenle" : "Yeni Özel Ders"} onClose={onClose}>
+      <Field label="Öğrenci *">
+        <select className={inputCls} value={form.studentId} onChange={(e) => setForm({ ...form, studentId: e.target.value })}>
+          {students.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+        </select>
+      </Field>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Tarih"><input type="date" className={inputCls} value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} /></Field>
+        <Field label="Ücret (₺) *"><input type="number" min="0" className={inputCls} value={form.fee} onChange={(e) => setForm({ ...form, fee: e.target.value })} placeholder="500" /></Field>
+      </div>
+      <Field label="Ders / Konu (opsiyonel)">
+        <input className={inputCls} value={form.topic} onChange={(e) => setForm({ ...form, topic: e.target.value })} placeholder="Örn. Türev - Ekstra çalışma" />
+      </Field>
+      <PrimaryButton disabled={saving} onClick={() => form.studentId && form.fee !== "" && onSave({ ...form, fee: Number(form.fee) })} className="mt-2">{saving ? "Kaydediliyor…" : "Kaydet"}</PrimaryButton>
     </Modal>
   );
 }
